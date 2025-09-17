@@ -1,1 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Random Review Sentiment Explorer</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha512-p1CmS2+GIU2zFEgVJFP5rTnZLk2JdpLqQtIi6ntZjDUZIr05oig3NbS1V6jJQMBFjC3b8V3ucO8dvM8VxN8BGg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <style>
+        :root {
+            color-scheme: light dark;
+            --bg: #0f172a;
+            --card-bg: rgba(255, 255, 255, 0.08);
+            --accent: #38bdf8;
+            --text-primary: #f8fafc;
+            --text-secondary: #cbd5f5;
+        }
 
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Inter", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0f172a, #1e293b);
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+
+        .app-shell {
+            width: min(900px, 100%);
+            background: linear-gradient(145deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.9));
+            border-radius: 18px;
+            padding: clamp(1.5rem, 4vw, 2.75rem);
+            box-shadow: 0 25px 60px rgba(15, 23, 42, 0.55);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+        }
+
+        header h1 {
+            margin: 0 0 0.5rem;
+            font-size: clamp(1.75rem, 5vw, 2.7rem);
+            font-weight: 700;
+            letter-spacing: 0.03em;
+        }
+
+        header p {
+            margin: 0;
+            font-size: clamp(1rem, 2.4vw, 1.15rem);
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        .input-row {
+            margin-top: 2rem;
+            display: grid;
+            gap: 0.75rem;
+        }
+
+        label {
+            font-weight: 600;
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+        }
+
+        input[type="password"],
+        button {
+            font: inherit;
+            border-radius: 12px;
+            border: 1px solid rgba(148, 163, 184, 0.35);
+            padding: 0.85rem 1rem;
+            transition: all 0.2s ease;
+        }
+
+        input[type="password"] {
+            background: rgba(15, 23, 42, 0.6);
+            color: var(--text-primary);
+        }
+
+        input[type="password"]::placeholder {
+            color: rgba(148, 163, 184, 0.8);
+        }
+
+        button {
+            background: linear-gradient(135deg, #0ea5e9, #2563eb);
+            color: white;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.6rem;
+            box-shadow: 0 15px 30px rgba(14, 165, 233, 0.25);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        button:not(:disabled):hover {
+            transform: translateY(-1px);
+            box-shadow: 0 22px 32px rgba(14, 165, 233, 0.35);
+        }
+
+        .review-card {
+            margin-top: 2.5rem;
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: clamp(1.25rem, 3vw, 2rem);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            display: grid;
+            gap: 1.5rem;
+        }
+
+        .review-text {
+            font-size: clamp(1rem, 2.6vw, 1.25rem);
+            line-height: 1.7;
+            color: #e2e8f0;
+            min-height: 4.5rem;
+        }
+
+        .status-message {
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+            min-height: 1.2rem;
+        }
+
+        .result-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+
+        .sentiment-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 1rem;
+        }
+
+        .sentiment-icon {
+            font-size: clamp(2rem, 5vw, 2.6rem);
+            transition: transform 0.2s ease;
+        }
+
+        .sentiment-icon.positive {
+            color: #22c55e;
+        }
+
+        .sentiment-icon.negative {
+            color: #ef4444;
+        }
+
+        .sentiment-icon.neutral {
+            color: #eab308;
+        }
+
+        .scores {
+            display: grid;
+            gap: 0.25rem;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .review-count {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        @media (max-width: 600px) {
+            body {
+                padding: 1rem;
+            }
+
+            .result-row {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-shell">
+        <header>
+            <h1>Random Review Sentiment Explorer</h1>
+            <p>Load product reviews from a TSV file, grab a random entry, and instantly evaluate its sentiment using Hugging Face's <em>siebert/sentiment-roberta-large-english</em> model.</p>
+        </header>
+
+        <div class="input-row">
+            <label for="token-input">Hugging Face API Token <span style="font-weight: 400; color: rgba(148, 163, 184, 0.8);">(optional)</span></label>
+            <input id="token-input" type="password" placeholder="hf_... (leave blank for anonymous access)" autocomplete="off">
+            <button id="analyze-button" disabled>
+                <i class="fa-solid fa-shuffle"></i>
+                Analyze Random Review
+            </button>
+            <div class="review-count" id="review-count"></div>
+            <div class="status-message" id="status-message"></div>
+        </div>
+
+        <div class="review-card">
+            <div class="review-text" id="review-text">Loading reviews...</div>
+            <div class="result-row">
+                <div class="sentiment-indicator">
+                    <i class="fa-solid fa-circle-question sentiment-icon neutral" id="sentiment-icon" aria-hidden="true"></i>
+                    <span id="sentiment-label">Sentiment analysis pending</span>
+                </div>
+                <div class="scores" id="score-details"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" integrity="sha512-3yjDvV6Xg3K05XdxQMUHppq74H5+1KX2wNT95HxW0QD9Y0ia6as4n9YTJ8HYJFDsUxw8yqXLg6BmOBLa9N4q3g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="app.js"></script>
+</body>
+</html>
