@@ -1,240 +1,227 @@
-const reviewTextElement = document.getElementById('review-text');
-const sentimentIconElement = document.getElementById('sentiment-icon');
-const sentimentLabelElement = document.getElementById('sentiment-label');
-const scoreDetailsElement = document.getElementById('score-details');
-const analyzeButton = document.getElementById('analyze-button');
-const tokenInput = document.getElementById('token-input');
-const statusMessageElement = document.getElementById('status-message');
-const reviewCountElement = document.getElementById('review-count');
+// app.js
+(() => {
+  const TSV_PATH = 'reviews_test.tsv';
+  const MODEL_URL = 'https://api-inference.huggingface.co/models/siebert/sentiment-roberta-large-english';
 
-let reviewTexts = [];
-let isAnalyzing = false;
+  const statusEl = document.getElementById('status');
+  const randomBtn = document.getElementById('randomBtn');
+  const reloadBtn = document.getElementById('reloadBtn');
+  const hfTokenInput = document.getElementById('hfToken');
+  const reviewArea = document.getElementById('reviewArea');
+  const reviewTextEl = document.getElementById('reviewText');
+  const sentIcon = document.getElementById('sentIcon');
+  const labelText = document.getElementById('labelText');
+  const scoreText = document.getElementById('scoreText');
+  const errorEl = document.getElementById('error');
 
-function setStatus(message) {
-    statusMessageElement.textContent = message;
-}
+  let reviews = []; // array of strings
 
-function setReviewCount(count) {
-    if (typeof count === 'number' && count > 0) {
-        reviewCountElement.textContent = `${count.toLocaleString()} review${count === 1 ? '' : 's'} available.`;
+  function setStatus(msg, muted = true) {
+    statusEl.textContent = msg;
+    statusEl.style.color = muted ? '' : '';
+  }
+
+  function showError(msg) {
+    errorEl.style.display = 'block';
+    errorEl.textContent = msg;
+  }
+
+  function clearError() {
+    errorEl.style.display = 'none';
+    errorEl.textContent = '';
+  }
+
+  function setIcon(type) {
+    // type: 'positive' | 'negative' | 'neutral' | 'loading' | 'idle'
+    sentIcon.className = 'icon';
+    if (type === 'positive') {
+      sentIcon.innerHTML = '<i class="fa-solid fa-thumbs-up" style="color:var(--success)"></i>';
+    } else if (type === 'negative') {
+      sentIcon.innerHTML = '<i class="fa-solid fa-thumbs-down" style="color:var(--danger)"></i>';
+    } else if (type === 'neutral') {
+      sentIcon.innerHTML = '<i class="fa-solid fa-question" style="color:var(--neutral)"></i>';
+    } else if (type === 'loading') {
+      sentIcon.innerHTML = '<i class="fa-solid fa-spinner fa-pulse" style="color:var(--muted)"></i>';
     } else {
-        reviewCountElement.textContent = '';
+      sentIcon.innerHTML = '<i class="fa-solid fa-comment" style="color:var(--muted)"></i>';
     }
-}
+  }
 
-function updateSentimentDisplay({ iconClasses, toneClass, labelText, details }) {
-    const classList = ['sentiment-icon'];
-    if (toneClass) {
-        classList.push(toneClass);
+  async function fetchAndParseTSV() {
+    setStatus('Fetching reviews_test.tsv...');
+    clearError();
+    reviewArea.style.display = 'none';
+    try {
+      const res = await fetch(TSV_PATH);
+      if (!res.ok) {
+        throw new Error(`Failed to fetch ${TSV_PATH}: ${res.status} ${res.statusText}`);
+      }
+      const text = await res.text();
+      setStatus('Parsing TSV with Papa Parse...');
+      const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+      if (parsed.errors && parsed.errors.length) {
+        // Some parse errors may be recoverable; show them as warnings but continue if data present
+        console.warn('PapaParse errors:', parsed.errors);
+      }
+      const data = parsed.data || [];
+      // Accept either column named 'text' or 'Text' (case-insensitive)
+      const lowerKeys = data.length ? Object.keys(data[0]).map(k => k.toLowerCase()) : [];
+      let textKey = null;
+      if (lowerKeys.includes('text')) {
+        // find actual key name
+        textKey = Object.keys(data[0]).find(k => k.toLowerCase() === 'text');
+      }
+
+      if (!textKey) {
+        throw new Error('TSV does not contain a "text" column (case-insensitive).');
+      }
+
+      reviews = data.map(row => (row[textKey] != null ? String(row[textKey]) : '')).filter(t => t.trim().length > 0);
+
+      if (!reviews.length) {
+        throw new Error('No non-empty reviews found in "text" column.');
+      }
+
+      setStatus(`Loaded ${reviews.length} reviews. Ready.`);
+      reviewArea.style.display = 'block';
+      setIcon('idle');
+      labelText.textContent = 'Label: —';
+      scoreText.textContent = 'Score: —';
+      reviewTextEl.textContent = 'Click "Analyze Random Review" to start.';
+    } catch (err) {
+      setStatus('Error loading TSV.');
+      showError(err.message || String(err));
+      console.error(err);
     }
-    const icons = Array.isArray(iconClasses) ? iconClasses : ['fa-solid', 'fa-circle-question'];
-    classList.push(...icons);
-    sentimentIconElement.className = classList.join(' ');
-    sentimentLabelElement.textContent = labelText;
+  }
 
-    scoreDetailsElement.replaceChildren();
-    (details || []).forEach(detail => {
-        const line = document.createElement('span');
-        line.textContent = detail;
-        scoreDetailsElement.appendChild(line);
-    });
-}
+  function pickRandomReview() {
+    if (!reviews.length) return null;
+    const idx = Math.floor(Math.random() * reviews.length);
+    return reviews[idx];
+  }
 
-function prettifyLabel(label) {
-    const normalized = String(label || '').toLowerCase();
-    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
-}
+  async function analyzeReview(review) {
+    clearError();
+    labelText.textContent = 'Label: —';
+    scoreText.textContent = 'Score: —';
+    setIcon('loading');
+    setStatus('Calling Hugging Face Inference API...');
+    const token = hfTokenInput.value.trim();
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
 
-function interpretSentimentResponse(data) {
-    let predictions = data;
-    if (Array.isArray(predictions) && predictions.length === 1 && Array.isArray(predictions[0])) {
-        predictions = predictions[0];
-    }
+    const body = JSON.stringify({ inputs: review });
 
-    if (!Array.isArray(predictions)) {
-        throw new Error('Unexpected response format from Hugging Face.');
-    }
+    try {
+      const resp = await fetch(MODEL_URL, { method: 'POST', headers, body });
+      if (resp.status === 401 || resp.status === 403) {
+        throw new Error(`Authentication failed (status ${resp.status}). Check your token or try without a token for the free tier.`);
+      }
+      if (resp.status === 429) {
+        throw new Error('Rate limit or model busy (429). Try again later or provide a token with higher rate limits.');
+      }
+      if (!resp.ok) {
+        // Attempt to parse JSON error message from HF
+        let errText = `${resp.status} ${resp.statusText}`;
+        try {
+          const j = await resp.json();
+          if (j && j.error) errText += ` — ${j.error}`;
+        } catch (e) {}
+        throw new Error(`API error: ${errText}`);
+      }
 
-    const cleanedPredictions = predictions
-        .map(item => ({
-            label: typeof item.label === 'string' ? item.label.trim().toUpperCase() : '',
-            score: typeof item.score === 'number' ? item.score : NaN,
-        }))
-        .filter(item => item.label && Number.isFinite(item.score));
+      const json = await resp.json();
 
-    if (!cleanedPredictions.length) {
-        throw new Error('No sentiment predictions were returned.');
-    }
-
-    let positiveScore = null;
-    let negativeScore = null;
-    cleanedPredictions.forEach(item => {
-        if (item.label.includes('POSITIVE')) {
-            positiveScore = positiveScore === null ? item.score : Math.max(positiveScore, item.score);
+      // The instruction specified parse shape: [[{label: 'POSITIVE', score: number}]]
+      // But HF sometimes returns [{label,score}, ...]. Handle both.
+      let entry = null;
+      if (Array.isArray(json)) {
+        if (Array.isArray(json[0])) {
+          // [[{...}]]
+          entry = json[0][0];
+        } else if (json[0] && typeof json[0] === 'object' && 'label' in json[0]) {
+          // [{...}]
+          entry = json[0];
+        } else {
+          // Unexpected shape: try deep find first object with label & score
+          outer: for (const a of json) {
+            if (Array.isArray(a)) {
+              for (const b of a) {
+                if (b && typeof b === 'object' && 'label' in b && 'score' in b) {
+                  entry = b;
+                  break outer;
+                }
+              }
+            } else if (a && typeof a === 'object' && 'label' in a && 'score' in a) {
+              entry = a;
+              break;
+            }
+          }
         }
-        if (item.label.includes('NEGATIVE')) {
-            negativeScore = negativeScore === null ? item.score : Math.max(negativeScore, item.score);
-        }
-    });
+      } else if (json && typeof json === 'object' && 'error' in json) {
+        throw new Error(`API returned error: ${json.error}`);
+      }
 
-    const detailLines = cleanedPredictions.map(item => `${prettifyLabel(item.label)}: ${(item.score * 100).toFixed(1)}%`);
+      if (!entry || typeof entry !== 'object' || !('label' in entry) || !('score' in entry)) {
+        throw new Error('Unexpected API response format. See console for full response.');
+      }
 
-    if (positiveScore !== null && positiveScore > 0.5) {
-        return {
-            iconClasses: ['fa-solid', 'fa-thumbs-up'],
-            toneClass: 'positive',
-            labelText: 'Positive sentiment detected',
-            details: detailLines,
-        };
+      const label = String(entry.label).toUpperCase();
+      const score = Number(entry.score);
+
+      labelText.textContent = `Label: ${label}`;
+      scoreText.textContent = `Score: ${isFinite(score) ? score.toFixed(3) : '—'}`;
+
+      // Interpretation per spec:
+      // If score > 0.5 and label 'POSITIVE' → positive;
+      // 'NEGATIVE' → negative;
+      // else neutral.
+      let resultType = 'neutral';
+      if (score > 0.5 && label === 'POSITIVE') resultType = 'positive';
+      else if (score > 0.5 && label === 'NEGATIVE') resultType = 'negative';
+      else resultType = 'neutral';
+
+      setIcon(resultType);
+      setStatus('Analysis complete.');
+    } catch (err) {
+      console.error('Analyze error:', err);
+      setIcon('neutral');
+      setStatus('Analysis failed.');
+      showError(err.message || String(err));
     }
+  }
 
-    if (negativeScore !== null && negativeScore > 0.5) {
-        return {
-            iconClasses: ['fa-solid', 'fa-thumbs-down'],
-            toneClass: 'negative',
-            labelText: 'Negative sentiment detected',
-            details: detailLines,
-        };
+  async function onRandomClick() {
+    clearError();
+    if (!reviews.length) {
+      showError('No reviews loaded. Reload TSV first.');
+      return;
     }
-
-    return {
-        iconClasses: ['fa-solid', 'fa-circle-question'],
-        toneClass: 'neutral',
-        labelText: 'Neutral or uncertain sentiment',
-        details: detailLines,
-    };
-}
-
-async function queryHuggingFace(reviewText) {
-    const token = tokenInput.value.trim();
-    const headers = {
-        'Content-Type': 'application/json',
-    };
-
-    if (token) {
-        headers.Authorization = `Bearer ${token}`;
-    }
-
-    const response = await fetch('https://api-inference.huggingface.co/models/siebert/sentiment-roberta-large-english', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ inputs: reviewText }),
-    });
-
-    const payload = await response.json().catch(() => {
-        throw new Error('Failed to parse the Hugging Face response.');
-    });
-
-    if (!response.ok) {
-        const errorMessage = typeof payload.error === 'string' ? payload.error : `HTTP ${response.status}`;
-        throw new Error(`Hugging Face API error: ${errorMessage}`);
-    }
-
-    if (payload.error) {
-        throw new Error(`Hugging Face API error: ${payload.error}`);
-    }
-
-    return payload;
-}
-
-function pickRandomReview() {
-    if (!reviewTexts.length) {
-        throw new Error('No reviews available to analyze.');
-    }
-    const index = Math.floor(Math.random() * reviewTexts.length);
-    return reviewTexts[index];
-}
-
-async function handleAnalyzeClick() {
-    if (isAnalyzing) {
-        return;
-    }
-    if (!reviewTexts.length) {
-        setStatus('Reviews are still loading or unavailable.');
-        return;
-    }
-
-    isAnalyzing = true;
-    analyzeButton.disabled = true;
-
+    randomBtn.disabled = true;
+    reloadBtn.disabled = true;
+    setStatus('Selecting random review...');
     const review = pickRandomReview();
-    reviewTextElement.textContent = review;
-    updateSentimentDisplay({
-        iconClasses: ['fa-solid', 'fa-circle-notch', 'fa-spin'],
-        toneClass: 'neutral',
-        labelText: 'Analyzing sentiment...',
-        details: [],
-    });
-    setStatus('Analyzing review with Hugging Face Inference API...');
-
-    try {
-        const response = await queryHuggingFace(review);
-        const sentimentData = interpretSentimentResponse(response);
-        updateSentimentDisplay(sentimentData);
-        setStatus('Analysis complete.');
-    } catch (error) {
-        console.error(error);
-        updateSentimentDisplay({
-            iconClasses: ['fa-solid', 'fa-triangle-exclamation'],
-            toneClass: 'negative',
-            labelText: 'Unable to determine sentiment',
-            details: [],
-        });
-        setStatus(error.message || 'An unknown error occurred while analyzing sentiment.');
-    } finally {
-        isAnalyzing = false;
-        analyzeButton.disabled = !reviewTexts.length;
+    if (!review) {
+      showError('Failed to pick a review.');
+      randomBtn.disabled = false;
+      reloadBtn.disabled = false;
+      return;
     }
-}
+    reviewTextEl.textContent = review;
+    labelText.textContent = 'Label: —';
+    scoreText.textContent = 'Score: —';
+    reviewArea.style.display = 'block';
+    await analyzeReview(review);
+    randomBtn.disabled = false;
+    reloadBtn.disabled = false;
+  }
 
-async function loadReviews() {
-    try {
-        setStatus('Loading reviews from TSV file...');
-        reviewTextElement.textContent = 'Loading reviews...';
-        const response = await fetch('reviews_test.tsv', { cache: 'no-store' });
-        if (!response.ok) {
-            throw new Error(`Failed to fetch reviews (HTTP ${response.status}).`);
-        }
-        const tsvContent = await response.text();
-        const parsed = Papa.parse(tsvContent, {
-            header: true,
-            delimiter: '\t',
-            skipEmptyLines: true,
-        });
+  randomBtn.addEventListener('click', onRandomClick);
+  reloadBtn.addEventListener('click', () => {
+    fetchAndParseTSV();
+  });
 
-        if (parsed.errors && parsed.errors.length) {
-            const firstError = parsed.errors[0];
-            throw new Error(`Parsing error on row ${firstError.row ?? 'unknown'}: ${firstError.message}`);
-        }
-
-        const texts = parsed.data
-            .map(row => (typeof row.text === 'string' ? row.text.trim() : ''))
-            .filter(text => text.length > 0);
-
-        if (!texts.length) {
-            throw new Error('No valid review texts found in the TSV file.');
-        }
-
-        reviewTexts = texts;
-        setReviewCount(reviewTexts.length);
-        analyzeButton.disabled = false;
-        reviewTextElement.textContent = 'Click "Analyze Random Review" to explore a sentiment insight!';
-        setStatus('Reviews loaded successfully.');
-    } catch (error) {
-        console.error(error);
-        reviewTexts = [];
-        analyzeButton.disabled = true;
-        setReviewCount(0);
-        reviewTextElement.textContent = 'Unable to load reviews.';
-        updateSentimentDisplay({
-            iconClasses: ['fa-solid', 'fa-circle-question'],
-            toneClass: 'neutral',
-            labelText: 'Sentiment analysis pending',
-            details: [],
-        });
-        setStatus(error.message || 'An unknown error occurred while loading reviews.');
-    }
-}
-
-analyzeButton.addEventListener('click', handleAnalyzeClick);
-loadReviews();
+  // Initial load
+  fetchAndParseTSV();
+})();
