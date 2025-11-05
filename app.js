@@ -4,8 +4,8 @@
   
   // Альтернативные модели для sentiment analysis
   const MODELS = {
-    primary: 'https://api-inference.huggingface.co/models/cardiffnlp/twitter-roberta-base-sentiment-latest',
-    fallback: 'https://api-inference.huggingface.co/models/distilbert-base-uncased-finetuned-sst-2-english'
+    primary: 'https://router.huggingface.co/hf-inference/models/cardiffnlp/twitter-roberta-base-sentiment-latest',
+    fallback: 'https://router.huggingface.co/hf-inference/models/distilbert-base-uncased-finetuned-sst-2-english'
   };
 
   const statusEl = document.getElementById('status');
