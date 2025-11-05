@@ -11,7 +11,7 @@
   const statusEl = document.getElementById('status');
   const randomBtn = document.getElementById('randomBtn');
   const reloadBtn = document.getElementById('reloadBtn');
-  const hfTokenInput = document.getElementById('hfToken');
+  const hfTokenInput = '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';
   const reviewArea = document.getElementById('reviewArea');
   const reviewTextEl = document.getElementById('reviewText');
   const sentIcon = document.getElementById('sentIcon');
