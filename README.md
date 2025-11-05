@@ -10,4 +10,4 @@ My place to practice
 - Hybrid AI/Local analysis
 - RCIF prompt implementation
 
-**Live Demo:** https://dzerusya.github.io/aiinbusiness2025/
+**Live Demo:** [https://yourstyle.github.io/AI-in-business/](https://yourstyle.github.io/AI-in-business/)
